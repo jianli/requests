@@ -12,6 +12,7 @@ import socket
 
 from .models import Response
 from .packages.urllib3.poolmanager import PoolManager, proxy_from_url
+from .packages.urllib3.response import HTTPResponse
 from .hooks import dispatch_hook
 from .compat import urlparse, basestring, urldefrag
 from .utils import (DEFAULT_CA_BUNDLE_PATH, get_encoding_from_headers,
@@ -152,25 +153,103 @@ class HTTPAdapter(BaseAdapter):
         """Sends PreparedRequest object. Returns Response object."""
 
         conn = self.get_connection(request.url, proxies)
+        # conn = conn.proxy_pool
 
         self.cert_verify(conn, request.url, verify, cert)
 
         url = self.request_url(request, proxies)
 
+        def chunk_data(data, chunk_size):
+            dl = len(data)
+            ret = ""
+            for i in range(dl // chunk_size):
+                ret += "%s\r\n" % (hex(chunk_size)[2:])
+                ret += "%s\r\n\r\n" % (data[i * chunk_size : (i + 1) * chunk_size])
+
+            if len(data) % chunk_size != 0:
+                ret += "%s\r\n" % (hex(len(data) % chunk_size)[2:])
+                ret += "%s\r\n" % (data[-(len(data) % chunk_size):])
+
+            ret += "0\r\n\r\n"
+            return ret
+
         try:
             # Send the request.
-            resp = conn.urlopen(
-                method=request.method,
-                url=url,
-                body=request.body,
-                headers=request.headers,
-                redirect=False,
-                assert_same_host=False,
-                preload_content=False,
-                decode_content=False,
-                retries=self.max_retries,
-                timeout=timeout,
-            )
+            # print conn.__dict__
+            # print dir(conn)
+            # print conn.send
+            low_conn = conn._get_conn(timeout=timeout)
+            # self._make_request(conn, method, url,
+            #                                       timeout=timeout,
+            #                                       body=body, headers=headers)
+            # print request.__dict__
+            # print request.body
+            low_conn.putrequest(request.method, url)
+
+            for header, value in request.headers.items():
+                # low_conn.putheader(header, value)
+                # print '{}: {}'.format(header, value)
+                if header != 'Accept-Encoding':
+                    low_conn.putheader(header, value)
+
+            # low_conn.putheader('Host', 'localhost')
+
+            # low_conn.putheader('Content-Length', '5')
+            # low_conn.endheaders('thisandthat')
+            low_conn.endheaders()
+
+            # low_conn.send('test')
+            # low_conn.send('test2')
+
+            a = ''
+            for i in request.body:
+                # print i
+                # chunk = '%s\r\n%s\r\n'%(hex(len(i)), i)
+                # chunk = "".join(("%X\r\n" % len(i), i, "\r\n"))
+                chunk = '%s\r\n%s\r\n' % (hex(len(i))[2:], i)
+                # chunk = chunk_data(i, len(i))
+                # print chunk,
+                # print i
+                low_conn.send(chunk)
+                a+=chunk
+
+            # print '0\r\n'
+            low_conn.send('0\r\n\r\n')
+            a+='0\r\n\r\n'
+            # print repr(a)
+            # yield '0\r\n'
+
+            # low_conn.send('oihwefoihwefiohwefoihwefiohwefiohwefoihwefoihef.')
+            # low_conn.send(chunk_data(request.body, 10).encode('utf-8'))
+
+            # print dir(low_conn)
+
+            # exit()
+            resp = low_conn.getresponse()
+            # print resp.read()
+            # return conn.getresponse()
+            # print resp
+            resp = HTTPResponse.from_httplib(resp, pool=conn, connection=low_conn, preload_content=False)
+            # print resp.__dict__
+
+            # print
+            # print
+
+            # print resp._original_response.read()
+
+
+            # resp = conn.urlopen(
+            #     method=request.method,
+            #     url=url,
+            #     body=request.body,
+            #     headers=request.headers,
+            #     redirect=False,
+            #     assert_same_host=False,
+            #     preload_content=False,
+            #     decode_content=False,
+            #     retries=self.max_retries,
+            #     timeout=timeout,
+            # )
 
         except socket.error as sockerr:
             raise ConnectionError(sockerr)

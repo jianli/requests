@@ -321,9 +321,22 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
     def prepare_body(self, data, files):
         """Prepares the given HTTP body data."""
 
-        # If a generator is provided, error out.
+        try:
+            length = len(data)
+        except (TypeError, AttributeError):
+            length = None
+
+        if length is None:
+            self.headers['Transfer-Encoding'] = 'chunked'
+            self.body = data
+            return
+
         if isinstance(data, type(_ for _ in [])):
-            raise NotImplementedError('Generator bodies are not supported yet.')
+
+            if files:
+                raise NotImplementedError('Streamed bodies and files are mutually exclusive.')
+
+            # raise NotImplementedError('Generator bodies are not supported yet.')
 
         # Nottin' on you.
         body = None
